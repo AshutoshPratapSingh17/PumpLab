@@ -182,7 +182,7 @@ function Btn({onClick,children,disabled,style={}}){return<button onClick={onClic
 
 // ── COUNTDOWN ──
 function Countdown({days=14}){
-  const[c,setC]=useState(days);
+  const[c]=useState(days);
   const r=54,circ=2*Math.PI*r,dash=circ-((30-c)/30)*circ;
   const col=c<=7?"#ef4444":c<=14?"#f97316":"#39ff14";
   return<div style={{display:"flex",flexDirection:"column",alignItems:"center"}}><div style={{position:"relative",width:130,height:130}}><svg style={{width:"100%",height:"100%",transform:"rotate(-90deg)"}} viewBox="0 0 120 120"><circle cx="60" cy="60" r={r} fill="none" stroke="#1a1a2e" strokeWidth="8"/><circle cx="60" cy="60" r={r} fill="none" stroke={col} strokeWidth="8" strokeLinecap="round" strokeDasharray={circ} strokeDashoffset={dash} style={{transition:"stroke-dashoffset 0.8s ease,stroke 0.5s ease",filter:`drop-shadow(0 0 8px ${col})`}}/></svg><div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}><span style={{fontSize:28,fontWeight:900,color:"white",lineHeight:1}}>{c}</span><span style={{fontSize:9,color:"#6b7280",fontWeight:700,letterSpacing:3,marginTop:3}}>DAYS</span></div></div><p style={{fontSize:10,color:"#6b7280",marginTop:6,letterSpacing:2,textTransform:"uppercase"}}>Until Renewal</p></div>;
