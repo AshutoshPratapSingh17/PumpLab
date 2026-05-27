@@ -1,8 +1,9 @@
-import React,{createContext,useContext,useState,useEffect}from"react";
+import React,{createContext,useContext,useState,useEffect,useRef}from"react";
 import{BrowserRouter,Routes,Route,Navigate,useNavigate,useLocation}from"react-router-dom";
 import"./index.css";
 
-const PRODUCTS=[
+// ── FIX #5: Products fetched from public API (with hardcoded fallback) ──
+const FALLBACK_PRODUCTS=[
   {id:1,name:"Vegetarian Muscle Stack",subtitle:"Plant-Powered Gains",price:2499,originalPrice:2999,emoji:"🌿",accent:"#10b981",badge:"Bestseller",macros:{protein:"42g",carbs:"12g",fat:"6g"},description:"Complete plant-based protein blend.",weight:"1kg",flavors:["Chocolate","Vanilla"]},
   {id:2,name:"Soya Isolate Blend",subtitle:"Ultra-Pure Protein",price:1899,originalPrice:2199,emoji:"⚡",accent:"#06b6d4",badge:"New",macros:{protein:"38g",carbs:"4g",fat:"2g"},description:"95% pure soy protein isolate.",weight:"900g",flavors:["Chocolate Fudge"]},
   {id:3,name:"High-Protein Oats",subtitle:"Morning Fuel Complex",price:899,originalPrice:1099,emoji:"🔥",accent:"#f97316",badge:"Sale",macros:{protein:"28g",carbs:"55g",fat:"8g"},description:"Whole grain oats with whey protein.",weight:"2kg",flavors:["Banana","Berry"]},
@@ -10,6 +11,32 @@ const PRODUCTS=[
   {id:5,name:"BCAA Recovery Mix",subtitle:"Muscle Repair Formula",price:1599,originalPrice:1899,emoji:"🧬",accent:"#ec4899",badge:"Top Rated",macros:{protein:"5g",carbs:"3g",fat:"0g"},description:"2:1:1 ratio BCAAs + electrolytes.",weight:"400g",flavors:["Watermelon","Mango"]},
   {id:6,name:"Pre-Workout Ignite",subtitle:"Explosive Energy Blend",price:1749,originalPrice:2099,emoji:"🚀",accent:"#eab308",badge:"Intense",macros:{protein:"2g",carbs:"8g",fat:"0g"},description:"200mg caffeine + beta-alanine.",weight:"300g",flavors:["Green Apple"]},
 ];
+
+// Map Open Food Facts API category results into our product shape
+function mapApiProducts(items){
+  const emojis=["🌿","⚡","🔥","💪","🧬","🚀","🥛","🍃"];
+  const accents=["#10b981","#06b6d4","#f97316","#8b5cf6","#ec4899","#eab308","#39ff14","#ef4444"];
+  const badges=["New","Popular","Sale","Top Rated","Bestseller","Intense",null,null];
+  return items.slice(0,8).map((p,i)=>({
+    id:p.id||i+100,
+    name:p.product_name||p.abbreviated_product_name||"Supplement "+( i+1),
+    subtitle:p.brands||"Nutrition Product",
+    price:Math.floor(Math.random()*2000)+500,
+    originalPrice:Math.floor(Math.random()*800)+2000,
+    emoji:emojis[i%emojis.length],
+    accent:accents[i%accents.length],
+    badge:badges[i%badges.length],
+    macros:{
+      protein:(p.nutriments?.proteins_100g||Math.floor(Math.random()*40)+5)+"g",
+      carbs:(p.nutriments?.carbohydrates_100g||Math.floor(Math.random()*30)+2)+"g",
+      fat:(p.nutriments?.fat_100g||Math.floor(Math.random()*10)+1)+"g",
+    },
+    description:(p.generic_name||p.ingredients_text||"Premium nutrition supplement.").slice(0,60)+".",
+    weight:(p.quantity||"500g"),
+    flavors:["Original"],
+  }));
+}
+
 const PLANS=[
   {id:"monthly",label:"Monthly",duration:"1 Month",days:30,price:999,originalPrice:1299,badge:null,color:"#06b6d4",features:["Full gym access","Progress tracking","Basic support","Store access"]},
   {id:"quarterly",label:"Quarterly",duration:"3 Months",days:90,price:2499,originalPrice:3897,badge:"Most Popular",color:"#39ff14",features:["Full gym access","10% supplement discount","Priority support","Save ₹1398"]},
@@ -19,13 +46,55 @@ const PHOTOS=["https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=80
 const MET={running:9.8,cycling:7.5,walking:3.5,swimming:8.0,rowing:7.0,jump_rope:12.3};
 const EXERCISES=[{value:"running",label:"🏃 Running"},{value:"cycling",label:"🚴 Cycling"},{value:"walking",label:"🚶 Walking"},{value:"swimming",label:"🏊 Swimming"},{value:"rowing",label:"🚣 Rowing"},{value:"jump_rope",label:"⏭ Jump Rope"}];
 
-// ── RAZORPAY ──
-const RZP_KEY="rzp_test_REPLACE_WITH_YOUR_KEY";
+// ── FIX #1: RAZORPAY — robust integration with proper error handling ──
+const RZP_KEY="rzp_test_REPLACE_WITH_YOUR_KEY"; // ← paste your Razorpay Key ID here
 function pay({amount,user,items,onSuccess,onFailure}){
-  if(!window.Razorpay){alert("Razorpay not loaded.");return;}
-  const rzp=new window.Razorpay({key:RZP_KEY,amount:amount*100,currency:"INR",name:"PumpLab",description:items[0]?.name||"PumpLab",prefill:{name:user?.name||"",email:user?.email||"",contact:user?.phone||""},theme:{color:"#39ff14"},modal:{ondismiss:()=>onFailure&&onFailure({reason:"Cancelled."})},handler:(r)=>{onSuccess&&onSuccess({id:r.razorpay_payment_id||"PAY_"+Date.now(),date:new Date().toISOString(),items,amount,status:"confirmed",paymentId:r.razorpay_payment_id});}});
-  rzp.on("payment.failed",(r)=>onFailure&&onFailure({reason:r.error?.description||"Failed."}));
-  rzp.open();
+  if(!window.Razorpay){
+    // Try loading the script dynamically if it wasn't in index.html
+    const script=document.createElement("script");
+    script.src="https://checkout.razorpay.com/v1/checkout.js";
+    script.onload=()=>pay({amount,user,items,onSuccess,onFailure});
+    script.onerror=()=>onFailure&&onFailure({reason:"Could not load Razorpay. Check your internet connection."});
+    document.head.appendChild(script);
+    return;
+  }
+  if(!RZP_KEY||RZP_KEY.includes("REPLACE")){
+    onFailure&&onFailure({reason:"Razorpay Key not configured. Add your key to RZP_KEY in App.js."});
+    return;
+  }
+  try{
+    const options={
+      key:RZP_KEY,
+      amount:Math.round(amount*100), // paise, must be integer
+      currency:"INR",
+      name:"PumpLab",
+      description:items[0]?.name||"PumpLab Order",
+      prefill:{name:user?.name||"",email:user?.email||"",contact:user?.phone||""},
+      theme:{color:"#39ff14"},
+      modal:{
+        ondismiss:()=>onFailure&&onFailure({reason:"Payment was cancelled."}),
+        escape:true,
+        animation:true,
+      },
+      handler:(response)=>{
+        onSuccess&&onSuccess({
+          id:response.razorpay_payment_id||"PAY_"+Date.now(),
+          date:new Date().toISOString(),
+          items,
+          amount,
+          status:"confirmed",
+          paymentId:response.razorpay_payment_id,
+        });
+      },
+    };
+    const rzp=new window.Razorpay(options);
+    rzp.on("payment.failed",(response)=>{
+      onFailure&&onFailure({reason:response.error?.description||response.error?.reason||"Payment failed. Please try again."});
+    });
+    rzp.open();
+  }catch(err){
+    onFailure&&onFailure({reason:"Failed to open payment: "+err.message});
+  }
 }
 
 // ── AUTH ──
@@ -51,6 +120,23 @@ function AuthProvider({children}){
     if(!found)throw new Error("Invalid email or password.");
     const{password:_,...safe}=found;persist(safe);return safe;
   };
+  // ── FIX #2: Google Sign-In handler ──
+  const loginWithGoogle=async(googleUser)=>{
+    const {name,email,picture,sub}=googleUser;
+    const users=getU();
+    let found=users.find(u=>u.email===email);
+    if(!found){
+      // auto-register Google users
+      found={id:sub||Date.now().toString(),name,email,password:"__google__",phone:"",
+        avatar:name.charAt(0).toUpperCase(),googlePicture:picture,
+        subscription:{renewalDays:14,plan:"Trial"},
+        stats:{workouts:0,prs:0,totalCaloriesBurned:0,totalKmRun:0},
+        lifts:{squat:{w:"",r:"",s:"",history:[]},bench:{w:"",r:"",s:"",history:[]},deadlift:{w:"",r:"",s:"",history:[]}},
+        workoutHistory:[],cardioSessions:[],orders:[],weight:"",height:"",age:""};
+      saveU([...users,found]);
+    }
+    const{password:_,...safe}=found;persist(safe);return safe;
+  };
   const logout=()=>{setUser(null);localStorage.removeItem("gz_s");};
   const updateUser=(updates)=>{
     const updated={...user,...updates};persist(updated);
@@ -58,19 +144,23 @@ function AuthProvider({children}){
     if(idx!==-1){users[idx]={...users[idx],...updates};saveU(users);}
   };
   const addOrder=(order)=>updateUser({orders:[...(user.orders||[]),order]});
-  return<AC.Provider value={{user,loading,register,login,logout,updateUser,addOrder}}>{children}</AC.Provider>;
+  return<AC.Provider value={{user,loading,register,login,loginWithGoogle,logout,updateUser,addOrder}}>{children}</AC.Provider>;
 }
 const useAuth=()=>useContext(AC);
 
-// ── CART ──
+// ── FIX #4: Cart persisted to localStorage so it survives refresh ──
 const CC=createContext(null);
+const CART_KEY="gz_cart";
+const loadCart=()=>{try{return JSON.parse(localStorage.getItem(CART_KEY))||[];}catch{return[];}};
+const saveCart=(items)=>{try{localStorage.setItem(CART_KEY,JSON.stringify(items));}catch{}};
 function CartProvider({children}){
-  const[items,setItems]=useState([]);
+  const[items,setItems]=useState(()=>loadCart());
   const[cartOpen,setCartOpen]=useState(false);
-  const addItem=(p)=>setItems(prev=>{const ex=prev.find(i=>i.id===p.id);return ex?prev.map(i=>i.id===p.id?{...i,qty:i.qty+1}:i):[...prev,{...p,qty:1}];});
-  const removeItem=(id)=>setItems(prev=>prev.filter(i=>i.id!==id));
-  const updateQty=(id,qty)=>qty<1?removeItem(id):setItems(prev=>prev.map(i=>i.id===id?{...i,qty}:i));
-  const clearCart=()=>setItems([]);
+  const setAndSave=(updater)=>setItems(prev=>{const next=typeof updater==="function"?updater(prev):updater;saveCart(next);return next;});
+  const addItem=(p)=>setAndSave(prev=>{const ex=prev.find(i=>i.id===p.id);return ex?prev.map(i=>i.id===p.id?{...i,qty:i.qty+1}:i):[...prev,{...p,qty:1}];});
+  const removeItem=(id)=>setAndSave(prev=>prev.filter(i=>i.id!==id));
+  const updateQty=(id,qty)=>qty<1?removeItem(id):setAndSave(prev=>prev.map(i=>i.id===id?{...i,qty}:i));
+  const clearCart=()=>setAndSave([]);
   const totalItems=items.reduce((s,i)=>s+i.qty,0);
   const subtotal=items.reduce((s,i)=>s+i.price*i.qty,0);
   const shipping=subtotal>1500?0:subtotal>0?99:0;
@@ -92,7 +182,7 @@ function Btn({onClick,children,disabled,style={}}){return<button onClick={onClic
 
 // ── COUNTDOWN ──
 function Countdown({days=14}){
-  const[c]=useState(days);
+  const[c,setC]=useState(days);
   const r=54,circ=2*Math.PI*r,dash=circ-((30-c)/30)*circ;
   const col=c<=7?"#ef4444":c<=14?"#f97316":"#39ff14";
   return<div style={{display:"flex",flexDirection:"column",alignItems:"center"}}><div style={{position:"relative",width:130,height:130}}><svg style={{width:"100%",height:"100%",transform:"rotate(-90deg)"}} viewBox="0 0 120 120"><circle cx="60" cy="60" r={r} fill="none" stroke="#1a1a2e" strokeWidth="8"/><circle cx="60" cy="60" r={r} fill="none" stroke={col} strokeWidth="8" strokeLinecap="round" strokeDasharray={circ} strokeDashoffset={dash} style={{transition:"stroke-dashoffset 0.8s ease,stroke 0.5s ease",filter:`drop-shadow(0 0 8px ${col})`}}/></svg><div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}><span style={{fontSize:28,fontWeight:900,color:"white",lineHeight:1}}>{c}</span><span style={{fontSize:9,color:"#6b7280",fontWeight:700,letterSpacing:3,marginTop:3}}>DAYS</span></div></div><p style={{fontSize:10,color:"#6b7280",marginTop:6,letterSpacing:2,textTransform:"uppercase"}}>Until Renewal</p></div>;
@@ -107,6 +197,48 @@ function Spark({data,color}){
   const pts=vals.map((v,i)=>({x:P+(i/(vals.length-1))*(W-P*2),y:H-P-((v-mn)/range)*(H-P*2)}));
   const d=pts.map((p,i)=>`${i===0?"M":"L"} ${p.x} ${p.y}`).join(" ");
   return<svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",maxWidth:300}}><defs><linearGradient id={`g${color.replace("#","")}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity="0.25"/><stop offset="100%" stopColor={color} stopOpacity="0"/></linearGradient></defs><path d={`${d} L ${pts[pts.length-1].x} ${H} L ${pts[0].x} ${H} Z`} fill={`url(#g${color.replace("#","")})`}/><path d={d} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>{pts.map((p,i)=><circle key={i} cx={p.x} cy={p.y} r="3" fill={color}/>)}</svg>;
+}
+
+// ── FIX #2: Google Sign-In Button (uses Google Identity Services) ──
+function GoogleSignInButton({onSuccess,onError}){
+  const btnRef=useRef(null);
+  useEffect(()=>{
+    const initGoogle=()=>{
+      if(!window.google?.accounts?.id)return;
+      window.google.accounts.id.initialize({
+        // ⬇ Replace with your Google OAuth Client ID from console.cloud.google.com
+        client_id:"YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com",
+        callback:(response)=>{
+          try{
+            // Decode JWT credential from Google
+            const base64=response.credential.split(".")[1];
+            const pad=base64.replace(/-/g,"+").replace(/_/g,"/");
+            const json=JSON.parse(atob(pad));
+            onSuccess(json);
+          }catch(e){onError("Failed to parse Google sign-in response.");}
+        },
+        auto_select:false,
+        cancel_on_tap_outside:true,
+      });
+      window.google.accounts.id.renderButton(btnRef.current,{
+        theme:"filled_black",shape:"pill",size:"large",width:340,
+        text:"signin_with",logo_alignment:"left",
+      });
+    };
+    // Load the Google script if not already loaded
+    if(window.google?.accounts?.id){initGoogle();return;}
+    const existing=document.getElementById("google-gsi-script");
+    if(existing){existing.addEventListener("load",initGoogle);return()=>existing.removeEventListener("load",initGoogle);}
+    const script=document.createElement("script");
+    script.id="google-gsi-script";
+    script.src="https://accounts.google.com/gsi/client";
+    script.async=true;
+    script.defer=true;
+    script.onload=initGoogle;
+    document.head.appendChild(script);
+    return()=>{};
+  },[onSuccess,onError]);
+  return<div ref={btnRef} style={{display:"flex",justifyContent:"center",marginTop:4}}/>;
 }
 
 // ── SUBSCRIPTION MODAL ──
@@ -467,34 +599,55 @@ function Cart(){
   </>;
 }
 
-// ── NAVBAR ──
+// ── FIX #3: NAVBAR — mobile-friendly with hamburger menu ──
 function Navbar(){
   const navigate=useNavigate();
   const location=useLocation();
   const{user,logout}=useAuth();
   const{totalItems,setCartOpen}=useCart();
+  const[menuOpen,setMenuOpen]=useState(false);
   const tabs=[{l:"📊 Dashboard",p:"/dashboard"},{l:"🏋️ Lifts",p:"/lifts"},{l:"🏃 Cardio",p:"/cardio"},{l:"📋 Workout",p:"/workout"},{l:"🛍 Store",p:"/store"},{l:"📦 Orders",p:"/orders"}];
-  return<nav style={{position:"sticky",top:0,zIndex:30,borderBottom:"1px solid rgba(255,255,255,0.05)",backdropFilter:"blur(20px)",background:"rgba(7,7,15,0.9)"}}>
-    <div style={{maxWidth:1200,margin:"0 auto",padding:"0 14px",display:"flex",alignItems:"center",justifyContent:"space-between",height:56,gap:10}}>
-      <button onClick={()=>navigate("/dashboard")} style={{display:"flex",alignItems:"center",gap:7,background:"none",border:"none",cursor:"pointer",flexShrink:0}}>
-        <div style={{width:28,height:28,borderRadius:7,background:"linear-gradient(135deg,#39ff14,#06b6d4)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,color:"#000",fontSize:12}}>P</div>
-        <span style={{fontFamily:"'Bebas Neue',cursive",fontSize:20,letterSpacing:4,color:"#39ff14"}}>PUMP<span style={{color:"white"}}>LAB</span></span>
-      </button>
-      <div style={{display:"flex",background:"rgba(255,255,255,0.04)",borderRadius:9,padding:3,border:"1px solid rgba(255,255,255,0.05)",overflowX:"auto",gap:1}}>
-        {tabs.map(t=><button key={t.p} onClick={()=>navigate(t.p)} style={{padding:"5px 9px",borderRadius:6,fontSize:10,fontWeight:700,whiteSpace:"nowrap",cursor:"pointer",border:"none",transition:"all 0.2s",background:location.pathname===t.p?"linear-gradient(135deg,#39ff14,#06b6d4)":"transparent",color:location.pathname===t.p?"#000":"#9ca3af"}}>{t.l}</button>)}
-      </div>
-      <div style={{display:"flex",alignItems:"center",gap:5,flexShrink:0}}>
-        <button onClick={()=>setCartOpen(true)} style={{position:"relative",display:"flex",alignItems:"center",gap:4,padding:"6px 9px",borderRadius:9,border:"1px solid rgba(255,255,255,0.1)",background:"rgba(255,255,255,0.03)",cursor:"pointer",color:"white",fontSize:11,fontWeight:700}}>
-          🛒<span>Cart</span>
-          {totalItems>0&&<span style={{position:"absolute",top:-5,right:-5,width:17,height:17,borderRadius:"50%",background:"#39ff14",color:"#000",fontSize:9,fontWeight:900,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 0 7px #39ff1460"}}>{totalItems}</span>}
+  const go=(path)=>{navigate(path);setMenuOpen(false);};
+  return<>
+    <style>{`
+      @media(min-width:768px){.nav-desktop{display:flex!important}.nav-hamburger{display:none!important}}
+      @media(max-width:767px){.nav-desktop{display:none!important}.nav-hamburger{display:flex!important}}
+      @keyframes slideDown{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+    `}</style>
+    <nav style={{position:"sticky",top:0,zIndex:30,borderBottom:"1px solid rgba(255,255,255,0.05)",backdropFilter:"blur(20px)",background:"rgba(7,7,15,0.95)"}}>
+      <div style={{maxWidth:1200,margin:"0 auto",padding:"0 14px",display:"flex",alignItems:"center",justifyContent:"space-between",height:56,gap:10}}>
+        {/* Logo */}
+        <button onClick={()=>go("/dashboard")} style={{display:"flex",alignItems:"center",gap:7,background:"none",border:"none",cursor:"pointer",flexShrink:0}}>
+          <div style={{width:28,height:28,borderRadius:7,background:"linear-gradient(135deg,#39ff14,#06b6d4)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,color:"#000",fontSize:12}}>P</div>
+          <span style={{fontFamily:"'Bebas Neue',cursive",fontSize:20,letterSpacing:4,color:"#39ff14"}}>PUMP<span style={{color:"white"}}>LAB</span></span>
         </button>
-        {user&&<div style={{display:"flex",alignItems:"center",gap:5}}>
-          <button onClick={()=>navigate("/profile")} style={{width:28,height:28,borderRadius:"50%",background:"linear-gradient(135deg,#39ff14,#06b6d4)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,color:"#000",fontSize:12,border:"none",cursor:"pointer"}}>{user.avatar||user.name?.charAt(0)||"U"}</button>
-          <button onClick={()=>{logout();navigate("/auth");}} style={{fontSize:10,color:"#6b7280",background:"none",border:"none",cursor:"pointer",fontWeight:700}}>Out</button>
-        </div>}
+        {/* Desktop nav tabs */}
+        <div className="nav-desktop" style={{display:"none",background:"rgba(255,255,255,0.04)",borderRadius:9,padding:3,border:"1px solid rgba(255,255,255,0.05)",overflowX:"auto",gap:1,flex:1,maxWidth:560}}>
+          {tabs.map(t=><button key={t.p} onClick={()=>go(t.p)} style={{padding:"5px 9px",borderRadius:6,fontSize:10,fontWeight:700,whiteSpace:"nowrap",cursor:"pointer",border:"none",transition:"all 0.2s",background:location.pathname===t.p?"linear-gradient(135deg,#39ff14,#06b6d4)":"transparent",color:location.pathname===t.p?"#000":"#9ca3af"}}>{t.l}</button>)}
+        </div>
+        {/* Right side: cart + avatar + hamburger */}
+        <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+          <button onClick={()=>setCartOpen(true)} style={{position:"relative",display:"flex",alignItems:"center",gap:4,padding:"6px 9px",borderRadius:9,border:"1px solid rgba(255,255,255,0.1)",background:"rgba(255,255,255,0.03)",cursor:"pointer",color:"white",fontSize:11,fontWeight:700}}>
+            🛒<span className="nav-desktop" style={{display:"none"}}>Cart</span>
+            {totalItems>0&&<span style={{position:"absolute",top:-5,right:-5,width:17,height:17,borderRadius:"50%",background:"#39ff14",color:"#000",fontSize:9,fontWeight:900,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 0 7px #39ff1460"}}>{totalItems}</span>}
+          </button>
+          {user&&<button onClick={()=>go("/profile")} style={{width:28,height:28,borderRadius:"50%",background:"linear-gradient(135deg,#39ff14,#06b6d4)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,color:"#000",fontSize:12,border:"none",cursor:"pointer",flexShrink:0}}>{user.avatar||user.name?.charAt(0)||"U"}</button>}
+          {user&&<button onClick={()=>{logout();navigate("/auth");}} className="nav-desktop" style={{display:"none",fontSize:10,color:"#6b7280",background:"none",border:"none",cursor:"pointer",fontWeight:700}}>Out</button>}
+          {/* Hamburger button */}
+          <button className="nav-hamburger" onClick={()=>setMenuOpen(o=>!o)} style={{display:"flex",flexDirection:"column",justifyContent:"center",alignItems:"center",gap:4,width:32,height:32,background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:7,cursor:"pointer",padding:6}}>
+            <span style={{width:14,height:2,background:menuOpen?"#39ff14":"#9ca3af",borderRadius:2,transition:"all 0.2s",transform:menuOpen?"rotate(45deg) translate(4px,4px)":"none"}}/>
+            <span style={{width:14,height:2,background:menuOpen?"transparent":"#9ca3af",borderRadius:2,transition:"all 0.2s"}}/>
+            <span style={{width:14,height:2,background:menuOpen?"#39ff14":"#9ca3af",borderRadius:2,transition:"all 0.2s",transform:menuOpen?"rotate(-45deg) translate(4px,-4px)":"none"}}/>
+          </button>
+        </div>
       </div>
-    </div>
-  </nav>;
+      {/* Mobile dropdown menu */}
+      {menuOpen&&<div style={{animation:"slideDown 0.2s ease",borderTop:"1px solid rgba(255,255,255,0.05)",padding:"8px 14px 12px",display:"flex",flexDirection:"column",gap:4}}>
+        {tabs.map(t=><button key={t.p} onClick={()=>go(t.p)} style={{padding:"10px 12px",borderRadius:9,fontSize:12,fontWeight:700,textAlign:"left",cursor:"pointer",border:"none",background:location.pathname===t.p?"linear-gradient(135deg,#39ff14,#06b6d4)":"rgba(255,255,255,0.03)",color:location.pathname===t.p?"#000":"#9ca3af",borderLeft:location.pathname===t.p?"none":`3px solid rgba(255,255,255,0.05)`}}>{t.l}</button>)}
+        {user&&<button onClick={()=>{logout();navigate("/auth");setMenuOpen(false);}} style={{padding:"10px 12px",borderRadius:9,fontSize:12,fontWeight:700,textAlign:"left",cursor:"pointer",border:"none",background:"rgba(239,68,68,0.08)",color:"#ef4444",borderLeft:"3px solid rgba(239,68,68,0.2)",marginTop:4}}>🚪 Sign Out</button>}
+      </div>}
+    </nav>
+  </>;
 }
 
 // ── AUTH PAGE ──
@@ -505,7 +658,7 @@ function AuthPage(){
   const[loading,setLoading]=useState(false);
   const[showPw,setShowPw]=useState(false);
   const[imgIdx,setImgIdx]=useState(0);
-  const{login,register}=useAuth();
+  const{login,register,loginWithGoogle}=useAuth();
   const navigate=useNavigate();
   useEffect(()=>{const t=setInterval(()=>setImgIdx(i=>(i+1)%PHOTOS.length),4000);return()=>clearInterval(t);},[]);
   const ch=(e)=>{setForm(f=>({...f,[e.target.name]:e.target.value}));setError("");};
@@ -513,6 +666,12 @@ function AuthPage(){
     e.preventDefault();setError("");setLoading(true);
     try{if(mode==="login")await login({email:form.email,password:form.password});else{if(!form.name.trim())throw new Error("Name is required.");if(form.password.length<6)throw new Error("Password must be at least 6 characters.");await register(form);}navigate("/dashboard");}
     catch(err){setError(err.message);}finally{setLoading(false);}
+  };
+  const handleGoogle=async(googleUser)=>{
+    setError("");setLoading(true);
+    try{await loginWithGoogle(googleUser);navigate("/dashboard");}
+    catch(err){setError("Google sign-in failed: "+err.message);}
+    finally{setLoading(false);}
   };
   const inp=(label,name,type,ph)=><div style={{marginBottom:12}}>
     <label style={{display:"block",fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:2,marginBottom:5}}>{label}</label>
@@ -542,6 +701,15 @@ function AuthPage(){
         <div style={{borderRadius:16,border:"1px solid rgba(255,255,255,0.1)",padding:24,background:"rgba(13,17,23,0.97)"}}>
           <div style={{display:"flex",background:"rgba(255,255,255,0.05)",borderRadius:9,padding:3,marginBottom:20}}>
             {["login","register"].map(m=><button key={m} onClick={()=>{setMode(m);setError("");}} style={{flex:1,padding:"8px",borderRadius:6,fontSize:12,fontWeight:700,cursor:"pointer",border:"none",transition:"all 0.2s",background:mode===m?"linear-gradient(135deg,#39ff14,#06b6d4)":"transparent",color:mode===m?"#000":"#6b7280"}}>{m==="login"?"Sign In":"Create Account"}</button>)}
+          </div>
+          {/* Google Sign-In button */}
+          <div style={{marginBottom:16}}>
+            <GoogleSignInButton onSuccess={handleGoogle} onError={setError}/>
+            <div style={{display:"flex",alignItems:"center",gap:10,margin:"14px 0"}}>
+              <div style={{flex:1,height:1,background:"rgba(255,255,255,0.07)"}}/>
+              <span style={{fontSize:10,color:"#4b5563",fontWeight:700}}>OR</span>
+              <div style={{flex:1,height:1,background:"rgba(255,255,255,0.07)"}}/>
+            </div>
           </div>
           <form onSubmit={submit}>
             {mode==="register"&&inp("Full Name","name","text","Arjun Sharma")}
@@ -622,25 +790,45 @@ function DashboardPage(){
   </div>;
 }
 
-// ── STORE PAGE ──
+// ── FIX #5: STORE PAGE — products fetched from Open Food Facts API ──
 function StorePage(){
   const[search,setSearch]=useState("");
   const[sort,setSort]=useState("default");
-  const filtered=PRODUCTS.filter(p=>p.name.toLowerCase().includes(search.toLowerCase())).sort((a,b)=>sort==="price-asc"?a.price-b.price:sort==="price-desc"?b.price-a.price:0);
+  const[products,setProducts]=useState(FALLBACK_PRODUCTS);
+  const[apiStatus,setApiStatus]=useState("loading"); // loading | success | error
+  useEffect(()=>{
+    setApiStatus("loading");
+    // Open Food Facts — free, no key needed, fetches sports/fitness nutrition products
+    fetch("https://world.openfoodfacts.org/cgi/search.pl?search_terms=protein+supplement&search_simple=1&action=process&json=1&page_size=12&fields=id,product_name,abbreviated_product_name,brands,generic_name,ingredients_text,quantity,nutriments,image_url")
+      .then(r=>{if(!r.ok)throw new Error("API error");return r.json();})
+      .then(data=>{
+        const valid=(data.products||[]).filter(p=>p.product_name&&p.product_name.trim().length>2);
+        if(valid.length>=4){setProducts(mapApiProducts(valid));setApiStatus("success");}
+        else{setProducts(FALLBACK_PRODUCTS);setApiStatus("error");}
+      })
+      .catch(()=>{setProducts(FALLBACK_PRODUCTS);setApiStatus("error");});
+  },[]);
+  const filtered=products.filter(p=>p.name.toLowerCase().includes(search.toLowerCase())).sort((a,b)=>sort==="price-asc"?a.price-b.price:sort==="price-desc"?b.price-a.price:0);
   return<div style={{maxWidth:1152,margin:"0 auto",padding:"28px 16px"}}>
     <div style={{borderRadius:16,overflow:"hidden",position:"relative",height:140,marginBottom:24}}>
       <img src={PHOTOS[2]} alt="store" style={{width:"100%",height:"100%",objectFit:"cover",opacity:0.45}}/>
       <div style={{position:"absolute",inset:0,background:"linear-gradient(to right,rgba(7,7,15,0.95),rgba(7,7,15,0.4))"}}/>
       <div style={{position:"absolute",inset:0,padding:"0 26px",display:"flex",flexDirection:"column",justifyContent:"center"}}>
         <h1 style={{fontFamily:"'Bebas Neue',cursive",fontSize:40,letterSpacing:5,color:"#39ff14",textShadow:"0 0 20px #39ff1460",lineHeight:1}}>SUPPLEMENT STORE</h1>
-        <p style={{color:"rgba(255,255,255,0.45)",fontSize:11,marginTop:3}}>{PRODUCTS.length} products · Free shipping over ₹1,500</p>
+        <p style={{color:"rgba(255,255,255,0.45)",fontSize:11,marginTop:3}}>
+          {apiStatus==="loading"?"⏳ Fetching latest products...":apiStatus==="success"?`✅ ${products.length} live products · Free shipping over ₹1,500`:`${products.length} products · Free shipping over ₹1,500`}
+        </p>
       </div>
     </div>
     <div style={{display:"flex",gap:9,marginBottom:20,flexWrap:"wrap"}}>
       <div style={{position:"relative",flex:1,minWidth:160}}><span style={{position:"absolute",left:11,top:"50%",transform:"translateY(-50%)",color:"#6b7280",fontSize:12}}>🔍</span><input type="text" placeholder="Search..." value={search} onChange={e=>setSearch(e.target.value)} style={{width:"100%",paddingLeft:32,paddingRight:11,paddingTop:8,paddingBottom:8,borderRadius:9,background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.1)",color:"white",fontSize:11,outline:"none",boxSizing:"border-box"}}/></div>
       <select value={sort} onChange={e=>setSort(e.target.value)} style={{padding:"8px 11px",borderRadius:9,background:"#0d1117",border:"1px solid rgba(255,255,255,0.1)",color:"#d1d5db",fontSize:11,outline:"none",cursor:"pointer"}}><option value="default">Sort: Default</option><option value="price-asc">Price: Low → High</option><option value="price-desc">Price: High → Low</option></select>
     </div>
-    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(250px,1fr))",gap:16}}>{filtered.map(p=><ProductCard key={p.id} product={p}/>)}</div>
+    {apiStatus==="loading"?<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(250px,1fr))",gap:16}}>
+      {[1,2,3,4,5,6].map(i=><div key={i} style={{borderRadius:14,border:"1px solid rgba(255,255,255,0.06)",background:"#0d1117",height:280,overflow:"hidden",position:"relative"}}><div style={{position:"absolute",inset:0,background:"linear-gradient(90deg,transparent,rgba(255,255,255,0.03),transparent)",animation:"shimmer 1.5s infinite"}} /></div>)}
+      <style>{"@keyframes shimmer{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}"}</style>
+    </div>
+    :<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(250px,1fr))",gap:16}}>{filtered.map(p=><ProductCard key={p.id} product={p}/>)}</div>}
   </div>;
 }
 
