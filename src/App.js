@@ -47,7 +47,7 @@ const MET={running:9.8,cycling:7.5,walking:3.5,swimming:8.0,rowing:7.0,jump_rope
 const EXERCISES=[{value:"running",label:"🏃 Running"},{value:"cycling",label:"🚴 Cycling"},{value:"walking",label:"🚶 Walking"},{value:"swimming",label:"🏊 Swimming"},{value:"rowing",label:"🚣 Rowing"},{value:"jump_rope",label:"⏭ Jump Rope"}];
 
 // ── FIX #1: RAZORPAY — robust integration with proper error handling ──
-const RZP_KEY="rzp_test_REPLACE_WITH_YOUR_KEY"; // ← paste your Razorpay Key ID here
+const RZP_KEY="rzp_test_fakekey123456789"; // ← paste your Razorpay Key ID here
 function pay({amount,user,items,onSuccess,onFailure}){
   if(!window.Razorpay){
     // Try loading the script dynamically if it wasn't in index.html
